@@ -1,0 +1,191 @@
+# 修改k8s-master的主机名为ca.skills.lan
+hostnamectl set-hostname ca.skills.lan --static
+
+# 修改k8s-node1的主机名为www.skills.lan
+hostnamectl set-hostname www.skills.lan --static
+
+# 重启系统以应用主机名更改
+reboot
+
+# 将系统镜像挂载到/mnt目录
+mount /dev/cdrom /mnt
+
+# 进入/etc/yum.repos.d目录
+cd /etc/yum.repos.d
+
+# 使用dnf生成一个文件
+dnf
+
+# 编辑生成的文件
+vi redhat.repo
+
+# 在redhat.repo文件中添加以下内容，设置本地镜像源
+[Base0S]
+name=Base0S
+baseurl=file:///mnt/BaseOS
+enabled=1
+gpgcheck=0
+
+[AppStream]
+name=AppStream
+baseurl=file:///mnt/AppStream
+enabled=1
+gpgcheck=0
+
+# 在ca上安装openssl-perl
+dnf install openssl-perl -y
+
+# 进入/etc/pki/CA目录
+cd /etc/pki/CA/
+
+# 创建索引文件
+touch index.txt
+
+# 创建序列号文件
+echo 01 > serial
+
+# 生成私钥
+openssl genrsa -out private/cakey.pem 2048
+
+# 生成自签名CA证书
+openssl req -x509 -new -key private/cakey.pem -out cacert.pem -days 3650
+
+# 填写证书信息，CN为ca.skills.lan，其他默认
+# 填写CN，Beijing，Beijing，skills，system，ca.skills.lan，后面的全部回车
+
+# 编辑/etc/hosts文件
+vi /etc/hosts
+
+# 添加主机名解析
+192.168.80.101 ca.skills.lan
+192.168.80.102 www.skills.lan web.skills.lan
+
+# 将修改后的/etc/hosts复制到www节点
+scp /etc/hosts www.skills.lan:/etc/hosts
+
+# 确认复制
+yes，密码：000 000
+
+# 切换到www节点进行操作
+# 以下操作需要在www节点上执行
+
+# 创建一个配置文件用于生成证书
+echo subjectAltName = DNS.1:skills.lan, DNS.2:*.skills.lan > skills.cnf
+
+# 使用CA签发证书
+openssl ca -in skills.csr -out skills.crt -extfile skills.cnf -days 1825
+
+# 确认生成证书
+y，y
+
+# 将证书导出为PFX格式
+openssl pkcs12 -export -in skills.crt -inkey skills.key -out skills.pfx
+
+# 将PFX文件复制到www节点
+scp skills.pfx www.skills.lan:/etc/pki/tls/certs
+
+# 切换到www节点进行操作
+
+# 将CA证书追加到系统CA证书文件
+cd /etc/pki/CA/
+cat cacert.pem >> /etc/pki/tls/certs/ca-bundle.crt
+
+# 在www节点上生成私钥
+cd /etc/pki/tls/certs/
+openssl genrsa -out skills.key 2048
+
+# 生成证书签名请求
+openssl req -new -key skills.key -out skills.csr -days 1825
+
+# 填写证书信息，CN为skills.lan，其他默认
+# 填写CN，Beijing，Beijing，skills，system，skills.lan，后面的全部回车
+
+# 将CSR和私钥复制到CA节点
+scp skills.csr ca.skills.lan:/etc/pki/CA
+scp skills.key ca.skills.lan:/etc/pki/CA
+
+# 切换到ca节点进行操作
+
+# 将PFX文件转换为PEM格式
+openssl pkcs12 -nodes -in skills.pfx -out skills.pem
+
+# 从PEM文件中提取私钥
+openssl rsa -in skills.pem -out apache.key
+
+# 从PEM文件中提取证书
+openssl x509 -in skills.pem -out apache.crt
+
+# 安装httpd和mod_ssl
+dnf install httpd mod_ssl -y
+
+# 编辑httpd配置文件
+cd /etc/httpd/conf/
+vi httpd.conf
+
+# 在httpd.conf文件中添加80端口的虚拟主机配置
+<VirtualHost *:80>
+    ServerName skills.lan
+    ServerAlias *.skills.lan
+    RewriteEngine on
+    RewriteRule ^(.*)$ https://www.skills.lan$1 [L,R=301]
+</VirtualHost>
+
+<VirtualHost *:80>
+    ServerName 192.168.80.102
+    <Location />
+        Order Allow,Deny
+        Deny from all
+    </Location>
+</VirtualHost>
+
+# 启用并启动httpd服务
+systemctl enable --now httpd
+
+# 允许80端口通过防火墙
+firewall-cmd --add-port=80/tcp --permanent
+
+# 重新加载防火墙规则
+firewall-cmd --reload
+
+# 编辑ssl.conf文件
+vi /etc/httpd/conf.d/ssl.conf
+
+# 修改SSL证书和密钥文件路径，并添加443端口的虚拟主机配置
+# 文件43，44行注释改掉，然后把www.***.com，修改成www.skills.lan
+SSLCertificateFile /etc/pki/tls/certs/apache.crt
+SSLCertificateKeyFile /etc/pki/tls/certs/apache.key
+
+<VirtualHost *:443>
+    ServerName skills.lan
+    ServerAlias *.skills.lan
+    RewriteEngine on
+    RewriteRule ^(.*)$ https://www.skills.lan$1 [L,R=301]
+    SSLEngine on
+    SSLCertificateFile /etc/pki/tls/certs/apache.crt
+    SSLCertificateKeyFile /etc/pki/tls/certs/apache.key
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName 192.168.80.102
+    <Location />
+        Order Allow,Deny
+        Deny from all
+    </Location>
+    SSLEngine on
+    SSLCertificateFile /etc/pki/tls/certs/apache.crt
+    SSLCertificateKeyFile /etc/pki/tls/certs/apache.key
+</VirtualHost>
+
+# 重启httpd服务
+systemctl restart httpd
+
+# 允许443端口通过防火墙
+firewall-cmd --add-port=443/tcp --permanent
+
+# 重新加载防火墙规则
+firewall-cmd --reload
+
+# 创建一个简单的网页内容
+echo HelloApache > /var/www/html/index.html
+
+# 切换到ca节点进行操作

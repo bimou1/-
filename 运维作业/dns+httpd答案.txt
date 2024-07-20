@@ -1,0 +1,165 @@
+k8s-master 作为 dns 服务器 为 k8s-node1 提供域名解析服务
+
+k8s-master 主机名修改为 dns.skills.lan
+答案：hostnamectl set-hostname dns.skills.lan --static
+
+k8s-node1 主机名修改为 www.skills.lan
+答案：hostnamectl set-hostname www.skills.lan --static
+改完然后重启：reboot
+
+提前准备：
+两台服务器上面的dns地址都指向192.168.80.101
+nmcli connection modify ens160 ipv4.dns 192.168.80.101
+nmcli connection up ens160
+
+
+
+
+dns 服务器域名对照关系:
+linux1.skills.lan --> 192.168.80.101
+linux2.skills.lan --> 192.168.80.102
+dns.skills.lan --> 192.168.80.101
+www.skills.lan --> 192.168.80.102
+web.skills.lan --> 192.168.80.102
+
+答案：
+把系统镜像挂载到/mnt目录
+mount /dev/cdrom /mnt
+cd到指定目录下
+cd /etc/yum.repos.d
+然后dnf生成一个文件
+dnf
+再编辑这个指定文件
+vi redhat.repo
+在指定文件里面添加以下内容
+[Base0S]
+name=Base0S
+baseurl=file:///mnt/BaseOS
+enabled=1
+gpgcheck=0
+[AppStream]
+name=AppStream
+baseurl=file:///mnt/AppStream
+enabled=1
+gpgcheck=0
+然后安装两个软件
+dnf install bind-chroot bind-utils -y
+安装好后，修改配置文件
+listen-on port 53 { 127.0.0.1; };
+allow-query     { localhost; };
+把127.0.0.1和localhost，改成any
+然后接着编辑文件
+vi /etc/named.rfc1912.zones
+在文件最下面添加以下内容
+zone "skills.lan" IN {{
+type master;
+file "1.localhost";
+allow-update { none; };
+};
+zone "80.168.192.in-addr.arpa" IN {
+type master;
+file "2.loopback";
+allow-update { none; };
+};
+cd 到指定目录下
+cd /var/named/
+cp -a named.localhost 1.localhost 复制文件中的内容到另一个文件里面
+cp -a named.loopback 2.loopback (没有则会创建文件)
+编辑文件
+vi 1.localhost
+示例：
+servera A 192.168.80.102
+serverb A 192.168.80.103
+编辑文件vi 2.loopback
+示例：
+102 PTR servera.skills.lan.
+103 PTR serverb.skills.lan.
+配置完后，启用服务，然后开机自启
+systemctl enable --now named
+dns服务器上面开启53/udp端口，然后重启防火墙
+firewall-cmd --add-port=53/udp --permanent
+firewall-cmd --reload
+然后dns部分就完成了！！！
+
+
+k8s-node1 安装httpd作为 web 服务器 提供web服务
+1. web服务器配置默认网站，
+要求：
+主配置文件中ServerName 修改为 192.168.80.102，根目录不做修改，/var/www/html/中index.html内容为ip地址
+配置完成后再在dns服务器端使用curl访问ip测试
+
+答案：
+把系统镜像挂载到/media/cdrom目录
+mkdir -p /media/cdrom
+mount /dev/cdrom /media/cdrom
+使用vi文本编辑器创建软件仓库的配置文件
+vi /etc/yum.repos.d/redhat.repo
+以下是写入配置文件的内容
+[BaseOS]
+name=BaseOS
+baseurl=file:///media/cdrom/BaseOS
+enabled=1
+gpgcheck=0
+[AppStream]
+name=AppStream
+baseurl=file:///media/cdrom/AppStream
+enabled=1
+gpgcheck=0
+安装Apache服务程序
+dnf install httpd
+启用httpd服务程序并将其加入到开机启动项中
+systemctl start httpd
+systemctl enable httpd
+vi进入主配置文件
+vi /etc/httpd/conf/httpd.conf
+将ServerName 后面修改为 192.168.80.102:80,大概在100行
+ServerName 192.168.80.102:80
+然后编辑/var/www/html/这个路径下的index.html文件
+vi /var/www/html/index.html
+在里面添加内容：192.168.80.102
+web服务器上面开启80/tcp端口，然后重启防火墙
+firewall-cmd --add-port=80/tcp --permanent
+firewall-cmd --reload
+配置完成后再在dns服务器端使用curl访问ip测试
+curl 192.168.80.102
+
+
+2. web服务器配置两个虚拟网站，
+要求：
+虚拟主机1 ServerName 为 www.skills.lan，根目录为/home/www，index.html内容为www
+虚拟主机2 ServerName 为 web.skills.lan，根目录为/home/web，index.html内容为web
+
+答案：
+分别在/home中创建用于保存不同网站数据的2个目录，并向其中分别写入网站的首页文件
+mkdir -p /home/www
+mkdir -p /home/web
+echo "www" > /home/www/index.html
+echo "web" > /home/www/index.html
+打开httpd服务的配置文件
+vim /etc/httpd/conf/httpd.conf
+最后一行，分别追加写入2个基于IP地址的虚拟主机网站参数，然后保存并退出
+<VirtualHost 192.168.80.102>
+     DocumentRoot /home/www
+     ServerName www.skills.lan
+     <Directory /home/www>
+     AllowOverride None
+     Require all granted
+     </Directory>
+</VirtualHost>
+
+<VirtualHost 192.168.80.102>
+     DocumentRoot /home/web
+     ServerName web.skills.lan
+     <Directory /home/web>
+     AllowOverride None
+     Require all granted
+     </Directory>
+</VirtualHost>
+重启httpd服务
+systemctl restart httpd
+手动把新的网站数据目录的SELinux安全上下文设置正确
+ semanage fcontext -at httpd_sys_content_t "/home(/.*)?"
+使用restorecon命令让新设置的SELinux安全上下文立即生效
+ restorecon -Rv /home/
+
+配置完成后在dns服务器端使用curl访问www.skills.lan和web.skills.lan两个域名测试

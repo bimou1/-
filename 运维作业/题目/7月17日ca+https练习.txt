@@ -1,0 +1,66 @@
+ca服务器:
+touch index.txt
+echo 01 > serial
+openssl genrsa -out private/cakey.pem 2048
+openssl req -x509 -new -key private/cakey.pem -out cacert.pem -days 3650
+
+www服务器:
+openssl genrsa -out skills.key 2048
+openssl req -new -key skills.key -out skills.csr -days 1825
+
+ca服务器:
+echo subjectAltName = DNS.1:skills.lan, DNS.2:*.skills.lan > openssl.cnf
+openssl ca -in skills.csr -out skills.crt -extfile openssl.cnf
+openssl x509 -noout -text -in skills.crt #检查证书信息
+
+openssl pkcs12 -export -in skills.crt -inkey skills.key -out skills.pfx
+openssl pkcs12 -nodes -in skills.pfx -out skills.pem
+openssl rsa -in skills.pem -out apache.key
+openssl x509 -in skills.pem -out apache.crt
+
+
+
+
+
+
+<VirtualHost *:80>
+        ServerName skills.lan
+        ServerAlias *.skills.lan
+        RewriteEngine on
+        RewriteRule ^(.*)$ https://www.skills.lan$1 [L,R=301]
+</VirtualHost>
+
+<VirtualHost *:80>
+        ServerName 192.168.80.102
+        <Location />
+                Order Allow,Deny
+                Deny from all
+        </Location>
+</VirtualHost>
+
+
+
+
+
+<VirtualHost *:443>
+        ServerName skills.lan
+        ServerAlias *.skills.lan
+        RewriteEngine on
+        RewriteRule ^(.*)$ https://www.skills.lan$1 [L,R=301]
+        SSLEngine on
+        SSLCertificateFile /etc/pki/tls/certs/apache.crt
+        SSLCertificateKeyFile /etc/pki/tls/certs/apache.key
+        SSLCACertificateFile /etc/pki/tls/certs/ca-bundle.crt
+</VirtualHost>
+
+<VirtualHost *:443>
+        ServerName 192.168.80.102
+        <Location />
+                Order Allow,Deny
+                Deny from all
+        </Location>
+        SSLEngine on
+        SSLCertificateFile /etc/pki/tls/certs/apache.crt
+        SSLCertificateKeyFile /etc/pki/tls/certs/apache.key
+        SSLCACertificateFile /etc/pki/tls/certs/ca-bundle.crt
+</VirtualHost>

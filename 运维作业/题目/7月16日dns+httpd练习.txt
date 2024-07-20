@@ -1,0 +1,25 @@
+k8s-master 作为 dns 服务器 为 k8s-node1 提供域名解析服务
+
+k8s-master 主机名修改为 dns.skills.lan
+k8s-node1 主机名修改为 www.skills.lan
+
+
+dns 服务器域名对照关系:
+linux1.skills.lan --> 192.168.80.101
+linux2.skills.lan --> 192.168.80.102
+dns.skills.lan --> 192.168.80.101
+www.skills.lan --> 192.168.80.102
+web.skills.lan --> 192.168.80.102
+
+k8s-node1 安装httpd作为 web 服务器 提供web服务
+1. web服务器配置默认网站，
+要求：
+主配置文件中ServerName 修改为 192.168.80.102，根目录不做修改，/var/www/html/中index.html内容为ip地址
+配置完成后再dns服务器端使用curl访问ip测试
+
+2. web服务器配置两个虚拟网站，
+要求：
+虚拟主机1 ServerName 为 www.skills.lan，根目录为/home/www，index.html内容为www
+虚拟主机2 ServerName 为 web.skills.lan，根目录为/home/web，index.html内容为web
+
+配置完成后在dns服务器端使用curl访问www.skills.lan和web.skills.lan两个域名测试

@@ -1,0 +1,19 @@
+把系统镜像挂载到/mnt目录
+mount /dev/cdrom /mnt
+cd到指定目录下
+cd /etc/yum.repos.d
+然后dnf生成一个文件
+dnf
+再编辑这个指定文件
+vi redhat.repo
+在指定文件里面添加以下内容
+[Base0S]
+name=Base0S
+baseurl=file:///mnt/BaseOS
+enabled=1
+gpgcheck=0
+[AppStream]
+name=AppStream
+baseurl=file:///mnt/AppStream
+enabled=1
+gpgcheck=0

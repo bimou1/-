@@ -1,0 +1,80 @@
+subnet 192.168.80.0 netmask 255.255.255.0 {
+	range 192.168.80.100 192.168.80.200; #下发地址范围
+	option subnet-mask 255.255.255.0 #子网掩码
+	option routers 192.168.80.2; #网关
+	option domain-name-servers 192.168.80.2 #dns服务器地址
+	default-lease-time 21600; #默认租约时间
+	max-lease-time 43200; #最大租约时间
+
+	host 主机名 {
+		hardware ethernet mac地址;
+		fixed-address 指定ip地址;
+	}
+}
+ip addr
+
+/usr/share/doc/dhcp-server/dhcpd.conf
+
+
+k8s-master , k8s-node1, k8s-node2
+dhcp
+dns主		dns从
+ca					httpd
+
+
+
+
+k8s-master 作为dhcp服务器为k8s-node1 和 node2 提供 dhcp 服务
+
+ens160 为vnet1网卡
+ens192 为vent8网卡
+
+手动配置:
+k8s-master  ens160	mac 00:50:56:00:00:01   ip   192.168.10.101    					   dns     192.168.10.101
+		  ens192	mac 00:50:56:00:00:02   ip    192.168.80.101    gateway 192.168.80.2     dns     192.168.80.2   使用ping -c 4 baidu.com 测试外网连通性
+ 
+dhcp下发地址:
+k8s-node1  ens160    mac 00:50:56:00:00:03   ip     192.168.10.102					    dns     192.168.10.102
+		  ens192    mac 00:50:56:00:00:04   ip    192.168.80.102    gateway 192.168.80.2     dns     192.168.80.2   使用ping -c 4 baidu.com 测试外网连通性
+
+k8s-node2   ens160   mac 00:50:56:00:00:05    ip     192.168.10.103    				     dns     192.168.10.102
+		   ens192   mac 00:50:56:00:00:06    ip     192.168.80.103    gateway 192.168.80.2    dns    192.168.80.2   使用ping -c 4 baidu.com 测试外网连通性
+
+
+k8s-master 为主dns服务器   开放53tcp/udp端口
+k8s-node1 为从dns服务器   开放53udp 端口
+
+dns对照关系:
+linux1.skills.lan               	192.168.10.101
+ca.skills.lan			192.168.10.101
+linux2.skills.lan			192.168.10.102
+www.skills.lan			192.168.10.103
+web.skills.lan			192.168.10.103
+linux3.skills.lan			192.168.10.103
+k8s-master.skills.lan 	 	192.168.80.101
+k8s-node1.skills.lan		192.168.80.102
+k8s-node2.skills.lan		192.168.80.103
+
+k8s-master 为ca服务器为k8s-node2的httpd服务提供证书，ca私钥和自签发证书位置默认
+自签名证书
+要求国家CN   省Shanghai  城市Shanghai   组织public    组织单位chinaskills   域名ca.skills.lan   有效期10年
+web申请证书
+要求序列号为05   国家CN   省Shanghai  城市Shanghai   组织public    组织单位chinaskills   域名skills.lan  和 *.skills.lan  有效期5年
+
+k8s-node2为web服务器，web私钥存放地址/etc/pki/tls/skills.key，申请证书存放位置/etc/pki/tls/skills.csr，
+数字证书存放位置/etc/pki/tls/skills.crt
+
+要求禁止使用192.168.10.103和192.168.80.103直接访问
+域名访问linux3.skills.lan时访问默认网站，文件位置默认为/var/www/html/index.html，内容为linux3
+域名访问www.skills.lan和web.skills.lan时(无论时http还是https)，统一301跳转到https://www.skills.lan，文件位置为/home/www/index.html，内容为www
+
+
+
+
+
+
+
+
+
+
+

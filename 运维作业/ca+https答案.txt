@@ -1,0 +1,118 @@
+k8s-master 做 ca，k8s-node1 做web加密
+k8s-master 主机名修改为 ca.skills.lan
+答案：hostnamectl set-hostname ca.skills.lan --static
+
+k8s-node1 主机名修改为 www.skills.lan
+答案：hostnamectl set-hostname www.skills.lan --static
+改完然后重启：reboot
+
+把系统镜像挂载到/mnt目录
+mount /dev/cdrom /mnt
+cd到指定目录下
+cd /etc/yum.repos.d
+然后dnf生成一个文件
+dnf
+再编辑这个指定文件
+vi redhat.repo
+在指定文件里面添加以下内容
+[Base0S]
+name=Base0S
+baseurl=file:///mnt/BaseOS
+enabled=1
+gpgcheck=0
+[AppStream]
+name=AppStream
+baseurl=file:///mnt/AppStream
+enabled=1
+gpgcheck=0
+
+ca：
+dnf install openssl-perl -y
+cd /etc/pki/CA/
+touch index.txt
+echo 01 > serial
+openssl genrsa -out private/cakey.pem 2048
+openssl req -x509 -new -key private/cakey.pem -out cacert.pem -days 3650
+CN，Beijing，Beijing，skills，system，ca.skills.lan，后面的全部回车
+vi /etc/hosts
+192.168.80.101 ca.skills.lan
+192.168.80.102 www.skills.lan web.skills.lan
+scp /etc/hosts www.skills.lan:/etc/hosts
+yes，密码：000 000
+切换到www上面进行操作！！！
+echo subjectAltName = DNS.1:skills.lan, DNS.2:*.skills.lan > skills.cnf
+openssl ca -in skills.csr -out skills.crt -extfile skills.cnf -days 1825
+y，y
+openssl pkcs12 -export -in skills.crt -inkey skills.key -out skills.pfx
+scp skills.pfx www.skills.lan:/etc/pki/tls/certs
+切换到www上面进行操作
+cd /etc/pki/CA/
+cat cacert.pem >> /etc/pki/tls/certs/ca-bundle.crt
+
+
+
+
+www：
+cd /etc/pki/tls/certs/
+openssl genrsa -out skills.key 2048
+openssl req -new -key skills.key -out skills.csr -days 1825
+CN，Beijing，Beijing，skills，system，skills.lan，后面的全部回车
+scp skills.csr ca.skills.lan:/etc/pki/CA
+yes，密码：000 000
+scp skills.key ca.skills.lan:/etc/pki/CA
+密码：000 000
+切换到ca进行操作！！！
+openssl pkcs12 -nodes -in skills.pfx -out skills.pem
+openssl rsa -in skills.pem -out apache.key
+openssl x509 -in skills.pem -out apache.crt
+dnf install httpd mod_ssl -y
+cd /etc/httpd/conf/
+vi httpd.conf
+在最后面添加
+<VirtualHost *:80>
+        ServerName skills.lan
+        ServerAlias *.skills.lan
+        RewriteEngine on
+        RewriteRule ^(.*)$ https://www.skills.lan$1 [L,R=301]
+</VirtualHost>
+
+<VirtualHost *:80>
+        ServerName 192.168.80.102
+        <Location />
+                Order Allow,Deny
+                Deny from all
+        </Location>
+</VirtualHost>
+systemctl enable --now httpd
+firewall-cmd --add-port=80/tcp --permanent
+firewall-cmd --reload
+vi /etc/httpd/conf.d/ssl.conf
+文件43，44行注释改掉，然后把www.***.com，修改成www.skills.lan
+把SSLCertificateFile /etc/pki/tls/private/localhost.crt，SSLCertificateKeyFile /etc/pki/tls/localhost.crt路径修改成
+/etc/pki/tls/certs/apache.crt，/etc/pki/tls/certs/apache.key
+在最后面添加
+<VirtualHost *:443>
+        ServerName skills.lan
+        ServerAlias *.skills.lan
+        RewriteEngine on
+        RewriteRule ^(.*)$ https://www.skills.lan$1 [L,R=301]
+        SSLEngine on
+        SSLCertificateFile /etc/pki/tls/certs/apache.crt
+        SSLCertificateKeyFile /etc/pki/tls/certs/apache.key
+</VirtualHost>
+
+<VirtualHost *:443>
+        ServerName 192.168.80.102
+        <Location />
+                Order Allow,Deny
+                Deny from all
+        </Location>
+        SSLEngine on
+        SSLCertificateFile /etc/pki/tls/certs/apache.crt
+        SSLCertificateKeyFile /etc/pki/tls/certs/apache.key
+</VirtualHost>
+systemctl restart httpd
+firewall-cmd --add-port=443/tcp --permanent
+firewall-cmd --reload
+echo HelloApache > /var/www/html/index.html
+切换到ca上面进行操作！！！

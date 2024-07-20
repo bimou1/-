@@ -1,0 +1,302 @@
+ens160 Vmnet1
+ens192 Vmnet8
+改MAC地址：
+k8s-master： 
+ens160 MAC：00:50:56:00:00:01
+ens192 MAC：00:50:56:00:00:02
+k8s-node1
+ens160 MAC：00:50:56:00:00:03
+ens192 MAC：00:50:56:00:00:04
+k8s-node2  
+ens160 MAC：00:50:56:00:00:05
+ens192 MAC：00:50:56:00:00:06
+k8s-master配置网络：
+nmcli connection del Wired\ connection\ 1
+nmcli connection del ens160
+nmcli connection add type ethernet ifname ens160 con-name ens160 ipv4.method manual ipv4.address 192.168.10.101/24 ipv4.dns 192.168.10.101 autoconnect yes
+nmcli connection add type ethernet ifname ens192 con-name ens192 ipv4.method manual ipv4.address 192.168.80.101/24 ipv4.gateway 192.168.80.101 ipv4.dns 192.168.80.101 autoconnect yes
+ping baidu.com -c 4 ping百度进行测试
+把系统镜像挂载到/mnt目录
+mount /dev/cdrom /mnt
+cd到指定目录下
+cd /etc/yum.repos.d
+然后dnf生成一个文件
+dnf
+再编辑这个指定文件
+vi redhat.repo
+在指定文件里面添加以下内容
+[BaseOS]
+name=BaseOS
+baseurl=file:///mnt/BaseOS
+enabled=1
+gpgcheck=0
+[AppStream]
+name=AppStream
+baseurl=file:///mnt/AppStream
+enabled=1
+gpgcheck=0
+dnf install dhcp-server -y
+cd ~
+vi /etc/dhcp/dhcpd.conf
+
+subnet 192.168.10.0 netmask 255.255.255.0 {
+  range 192.168.10.100 192.168.10.200;
+  option domain-name-servers 192.168.10.102;
+  default-lease-time 600;
+  max-lease-time 7200;
+
+	host k8s-node1_10 {
+		hardware ethernet 00:50:56:00:00:03;
+		fixed-address 192.168.10.102;
+	}
+	host k8s-node2_10 {
+		hardware ethernet 00:50:56:00:00:05;
+		fixed-address 192.168.10.103;
+	}
+}
+subnet 192.168.80.0 netmask 255.255.255.0 {
+  range 192.168.80.100 192.168.80.200;
+  option domain-name-servers 192.168.80.102;
+  option routers 192.168.80.2;
+  default-lease-time 600;
+  max-lease-time 7200;
+
+	host k8s-node1_80 {
+		hardware ethernet 00:50:56:00:00:04;
+		fixed-address 192.168.80.102;
+	}
+	host k8s-node2_80 {
+		hardware ethernet 00:50:56:00:00:06;
+		fixed-address 192.168.80.103;
+	}
+}
+systemctl restart dhcpd
+k8s-node1和k8s-node2统一配置的网络：
+nmcli connection del Wired\ connection\ 1
+nmcli connection del ens160
+nmcli connection add type ethernet ifname ens160 con-name ens160 ipv4.method auto autoconnect yes
+nmcli connection add type ethernet ifname ens192 con-name ens192 ipv4.method auto autoconnect yes
+k8s-master：
+dnf install bind-utils bind-chroot -y
+k8s-node1：
+把系统镜像挂载到/mnt目录
+mount /dev/cdrom /mnt
+cd到指定目录下
+cd /etc/yum.repos.d
+然后dnf生成一个文件
+dnf
+再编辑这个指定文件
+vi redhat.repo
+在指定文件里面添加以下内容
+[BaseOS]
+name=BaseOS
+baseurl=file:///mnt/BaseOS
+enabled=1
+gpgcheck=0
+[AppStream]
+name=AppStream
+baseurl=file:///mnt/AppStream
+enabled=1
+gpgcheck=0
+dnf install bind-utils bind-chroot -y
+k8s-node2：
+把系统镜像挂载到/mnt目录
+mount /dev/cdrom /mnt
+cd到指定目录下
+cd /etc/yum.repos.d
+然后dnf生成一个文件
+dnf
+再编辑这个指定文件
+vi redhat.repo
+在指定文件里面添加以下内容
+[BaseOS]
+name=BaseOS
+baseurl=file:///mnt/BaseOS
+enabled=1
+gpgcheck=0
+[AppStream]
+name=AppStream
+baseurl=file:///mnt/AppStream
+enabled=1
+gpgcheck=0
+dnf install bind-utils -y
+k8s-master：
+vi /etc/named.conf
+listen-on port 53 { any; };
+allow-query     { any; };
+
+scp /etc/named.conf 192.168.10.102:/etc/named.conf
+vi /etc/named.rfc1912.zones
+
+zone "skills.lan" IN {
+type master;
+file "named.skills";
+allow-update { 192.168.10.102; };
+};
+zone "skills.com" IN {
+type master;
+file "named.com";
+allow-update { 192.168.80.102; };
+};
+zone "10.168.192.in-addr.arpa" IN {
+type master;
+file "named.10";
+allow-update { 192.168.10.102; };
+};
+zone "80.168.192.in-addr.arpa" IN {
+type master;
+file "named.80";
+allow-update { 192.168.80.102; };
+};
+
+k8s-master：
+cd /var/named/
+cp -a named.localhost named.skills
+cp -a named.localhost named.com
+cp -a named.loopback named.10
+cp -a named.loopback named.80
+vi named.skills
+linux1 A 192.168.10.101
+linux2 A 192.168.10.102
+linux3 A 192.168.10.103
+ca       A  192.168.10.101
+www   A  192.168.10.103
+web    A  192.168.10.103 
+vi named.com
+k8s-master A 192.168.80.101
+k8s-node1  A 192.168.80.102
+k8s-node2  A 192.168.80.103
+vi named.10
+101 PTR linux1.skills.lan.
+102 PTR linux2.skills.lan.
+103 PTR linux3.skills.lan.
+101 PTR ca.skills.lan.
+103 PTR www.skills.lan.
+103 PTR web.skills.lan.
+vi named.80
+101 PTR k8s-master.skills.com
+102 PTR k8s-node1.skills.com
+103 PTR k8s-node2.skills.com
+systemctl enable --now named
+firewall-cmd --add-port=53/tcp --permanent
+firewall-cmd --add-port=53/udp --permanent
+firewall-cmd --reload
+scp /etc/named.rfc1912.zones 192.168.10.102:/etc/named.rfc1912.zones
+密码：000 000
+k8s-node1：
+vi /etc/named.rfc1912.zones
+:47,65s/master/slave
+:46,65s/allow-update/masters
+:46,65s/102/101
+文件路径改成
+slaves/named.skills
+slaves/named.com
+slaves/named.10
+slaves/named.80
+systemctl enable --now named
+systemctl restart named
+cd /var/named/slaves/
+firewall-cmd --add-port=53/udp --permanent
+firewall-cmd --reload
+!!!!!!!!!!!!!!!
+
+k8s-master：
+dnf install openssl-perl -y
+cd /etc/pki/CA/
+touch index.txt
+echo 01 > serial
+openssl genrsa -out private/cakey.pem 2048
+openssl req -x509 -new -key private/cakey.pem -out cacert.pem -days 3650
+国家CN   省Shanghai  城市Shanghai   组织public    组织单位chinaskills   域名ca.skills.lan
+k8s-node2：
+cd /etc/pki/tls/
+openssl genrsa -out skills.key 2048
+openssl req -new -key skills.key -out skills.csr -days 1825
+国家CN   省Shanghai  城市Shanghai   组织public    组织单位chinaskills   域名skills.lan
+scp skills.csr ca.skills.lan:/etc/pki/CA
+yes，密码：000 000
+k8s-master：
+echo subjectAltName = DNS.1:skills.lan, DNS.2:*.skills.lan > skills.cnf
+openssl ca -in skills.csr -out skills.crt -extfile skills.cnf
+y，y
+scp skills.crt www.skills.lan:/etc/pki/tls/
+yes，密码：000 000
+k8s-node2：
+cd /etc/pki/tls/
+dnf install httpd mod_ssl -y
+vi /etc/httpd/conf/httpd.conf
+第一百行ServerName 改成 linux3.skills.lan:80
+echo linux3 > /var/www/html/index.html
+firewall-cmd --add-port=80/tcp --permanent
+firewall-cmd --reload
+systemctl enable --now httpd
+在k8s-master上面进行测试，curl linux3.skills.lan，然后回到node2上面
+vi /etc/httpd/conf/httpd.conf
+在最后面添加
+<VirtualHost 192.168.10.103>
+        ServerName 192.168.10.103
+        <Location />
+                Order Allow,Deny
+                Deny from all
+        </Location>
+</VirtualHost>
+<VirtualHost 192.168.80.103>
+        ServerName 192.168.80.103
+        <Location />
+                Order Allow,Deny
+                Deny from all
+        </Location>
+</VirtualHost>
+<VirtualHost 192.168.10.103>
+    ServerName www.skills.lan
+    Redirect permanent / https://www.skills.lan/
+</VirtualHost>
+
+<VirtualHost 192.168.10.103>
+    ServerName web.skills.lan
+    Redirect permanent / https://www.skills.lan/
+</VirtualHost>
+
+<VirtualHost 192.168.80.103>
+    ServerName www.skills.lan
+    DocumentRoot /home/www/
+</VirtualHost>
+
+<VirtualHost 192.168.10.103>
+    ServerName linux3.skills.lan
+    DocumentRoot /var/www/html/
+</VirtualHost>
+
+
+vi /etc/httpd/conf.d/ssl.conf
+在最后面添加
+<VirtualHost *:443>
+        ServerName 192.168.10.103
+        <Location />
+                Order Allow,Deny
+                Deny from all
+        </Location>
+        SSLEngine on
+        SSLCertificateFile /etc/pki/tls/skills.crt
+        SSLCertificateKeyFile /etc/pki/tls/skills.key
+</VirtualHost>
+<VirtualHost *:443>
+        ServerName 192.168.80.103
+        <Location />
+                Order Allow,Deny
+                Deny from all
+        </Location>
+        SSLEngine on
+        SSLCertificateFile /etc/pki/tls/skills.crt
+        SSLCertificateKeyFile /etc/pki/tls/skills.key
+</VirtualHost>
+<VirtualHost *:443>
+    ServerName web.skills.lan
+    Redirect permanent / https://www.skills.lan/
+</VirtualHost>
+
+firewall-cmd --add-port=80/tcp --permanent
+firewall-cmd --add-port=443/tcp --permanent
+firewall-cmd --reload
+
+systemctl restart httpd
